@@ -1,0 +1,116 @@
+import inspect
+
+# A simple in-memory "database" to store records
+DATABASE = {}
+
+def debug_log(method):
+    """Decorator to log method calls and their arguments."""
+    def wrapper(*args, **kwargs):
+        class_name = args[0].__class__.__name__
+        method_name = method.__name__
+        print(f"[DEBUG] {class_name}.{method_name} called with args: {args[1:]}, kwargs: {kwargs}")
+        return method(*args, **kwargs)
+    return wrapper
+
+class ModelMeta(type):
+    """Metaclass that automatically registers models and generates CRUD methods."""
+    
+    def __new__(cls, name, bases, attrs):
+        if name == 'BaseModel':
+            return super().__new__(cls, name, bases, attrs)
+        
+        # Extract fields declared in the class
+        fields = {key: value for key, value in attrs.items() if isinstance(value, Field)}
+        attrs['_fields'] = fields
+        
+        # Create the new class
+        new_class = super().__new__(cls, name, bases, attrs)
+
+        # Register the model in the DATABASE
+        DATABASE[name] = []
+
+        # Inject CRUD methods dynamically
+        cls.create_crud_methods(new_class)
+
+        print(f"[Meta] Registered model: {name} with fields: {list(fields.keys())}")
+        return new_class
+
+    @classmethod
+    def create_crud_methods(cls, new_class):
+        """Dynamically create and add CRUD methods to the class."""
+        
+        @debug_log
+        def save(self):
+            DATABASE[self.__class__.__name__].append(self)
+            print(f"Saved: {self}")
+
+        @debug_log
+        def delete(self):
+            DATABASE[self.__class__.__name__].remove(self)
+            print(f"Deleted: {self}")
+
+        @classmethod
+        @debug_log
+        def all(cls_):
+            return DATABASE[cls_.__name__]
+
+        @classmethod
+        @debug_log
+        def filter(cls_, **kwargs):
+            result = []
+            for obj in DATABASE[cls_.__name__]:
+                if all(getattr(obj, key) == val for key, val in kwargs.items()):
+                    result.append(obj)
+            return result
+        
+        # Attach methods to the new class
+        setattr(new_class, 'save', save)
+        setattr(new_class, 'delete', delete)
+        setattr(new_class, 'all', all)
+        setattr(new_class, 'filter', filter)
+
+class Field:
+    """Represents a field in a model."""
+    def __init__(self, field_type):
+        self.field_type = field_type
+
+class BaseModel(metaclass=ModelMeta):
+    """Base class for all models."""
+    
+    def __init__(self, **kwargs):
+        for field_name in self._fields.keys():
+            setattr(self, field_name, kwargs.get(field_name))
+    
+    def __repr__(self):
+        fields = ", ".join(f"{k}={getattr(self, k)!r}" for k in self._fields)
+        return f"<{self.__class__.__name__}({fields})>"
+
+# ========================
+# Example Usage of the ORM
+# ========================
+
+class User(BaseModel):
+    id = Field(int)
+    name = Field(str)
+    email = Field(str)
+
+class Product(BaseModel):
+    id = Field(int)
+    name = Field(str)
+    price = Field(float)
+
+# Create instances
+u1 = User(id=1, name="Alice", email="alice@example.com")
+u2 = User(id=2, name="Bob", email="bob@example.com")
+p1 = Product(id=1, name="Laptop", price=1200.00)
+
+# Perform CRUD operations
+u1.save()
+u2.save()
+p1.save()
+
+print("\nAll Users:", User.all())
+print("Filtered Users (name='Alice'):", User.filter(name="Alice"))
+
+u2.delete()
+print("\nAll Users after deletion:", User.all())
